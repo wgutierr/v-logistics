@@ -714,12 +714,10 @@ def crear_pronosticos_generico(series_dict, periodos_atras=48, lags=6):
 
 # %%
 def generar_resumen_pt(resultados_pt):
-
     """
     Genera un DataFrame resumen con los mejores modelos y pronósticos finales   
     """
 
-    # Construir DataFrame de resumen final
     resumen_filas = []
 
     for (regional, producto), datos in resultados_pt.items():
@@ -727,14 +725,10 @@ def generar_resumen_pt(resultados_pt):
         metricas = datos['metricas']
         pronostico_final = datos['pronostico_final']
 
-        # Obtener métricas del mejor modelo
         rmse_val = metricas.loc[mejor_modelo, 'rmse']
         score_val = metricas.loc[mejor_modelo, 'score_porc']
-
-        # Extraer pronósticos del mejor modelo
         pronostico = pronostico_final[mejor_modelo]
 
-        # Convertir índice a columnas de pronóstico: 1, 2, ..., N
         fila = {
             'REGIONAL': regional,
             'PRODUCTO': producto,
@@ -743,20 +737,17 @@ def generar_resumen_pt(resultados_pt):
             'RMSE': round(rmse_val, 1),
         }
 
-        for i, (turno, valor) in enumerate(pronostico.items(), start=1):
-            fila[i] = round(valor, 0) if pd.notna(valor) else np.nan
+        for turno, valor in pronostico.items():
+            fila[turno] = round(valor, 0) if pd.notna(valor) else np.nan
 
         resumen_filas.append(fila)
 
-    # Crear DataFrame final
     df_resumen = pd.DataFrame(resumen_filas)
 
-    # Ordenar columnas: fijas + dinámicas (1, 2, ..., N)
     cols_fijas = ['REGIONAL', 'PRODUCTO','MODELO', 'SCORE_PORC', 'RMSE']
-    cols_turnos = sorted([col for col in df_resumen.columns if isinstance(col, int)])
+    cols_turnos = sorted([col for col in df_resumen.columns if isinstance(col, (int, str)) and col not in cols_fijas])
     df_resumen = df_resumen[cols_fijas + cols_turnos]
 
-    # Mostrar
     return df_resumen
 
 # %% [markdown]
@@ -775,11 +766,8 @@ def generar_resumen_mp(resultados_mp):
         metricas = datos['metricas']
         pronostico_final = datos['pronostico_final']
 
-        # Obtener métricas del mejor modelo
         rmse_val = metricas.loc[mejor_modelo, 'rmse']
         score_val = metricas.loc[mejor_modelo, 'score_porc']
-
-        # Extraer pronósticos del mejor modelo
         pronostico = pronostico_final[mejor_modelo]
 
         fila = {
@@ -789,17 +777,15 @@ def generar_resumen_mp(resultados_mp):
             'RMSE': round(rmse_val, 1),
         }
 
-        for i, valor in enumerate(pronostico.tolist(), start=1):
-            fila[i] = round(valor, 0) if pd.notna(valor) else np.nan
+        for turno, valor in pronostico.items():
+            fila[turno] = round(valor, 0) if pd.notna(valor) else np.nan
 
         resumen_filas.append(fila)
 
-    # Crear DataFrame
     df_resumen = pd.DataFrame(resumen_filas)
 
-    # Ordenar columnas
     cols_fijas = ['PRODUCTO', 'MODELO', 'SCORE_PORC', 'RMSE']
-    cols_turnos = sorted([col for col in df_resumen.columns if isinstance(col, int)])
+    cols_turnos = sorted([col for col in df_resumen.columns if col not in cols_fijas])
     df_resumen = df_resumen[cols_fijas + cols_turnos]
 
     return df_resumen
