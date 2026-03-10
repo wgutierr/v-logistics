@@ -1889,17 +1889,17 @@ def generar_resumen_mp(resultados_mp):
 
 
 
-st.set_page_config(page_title="App de PronÃ³sticos Mototrak", layout="wide")
+st.set_page_config(page_title="App de Pronosticos Mototrak", layout="wide")
 
 
 
-st.title("App de PronÃ³sticos para Producto Terminado y Materia Prima")
+st.title("App de Pronosticos para Producto Terminado y Materia Prima")
 #pestaÃ±a_pt, pestaÃ±a_mp = st.tabs(["PronÃ³sticos PT", "PronÃ³sticos MP"])
-seccion = st.sidebar.radio("Selecciona sección", ["Pronósticos PT", "Pronósticos MP", "Capacidad Procesos Planta"])
+seccion = st.sidebar.radio("Selecciona seccion", ["Pronosticos PT", "Pronosticos MP", "Capacidad Procesos Planta"])
 # ----------------------------
 # PESTAÃA PRODUCTO TERMINADO
 # ----------------------------
-if seccion == "PronÃ³sticos PT":
+if seccion == "Pronosticos PT":
     st.subheader("Cargar archivo de demanda consolidado")
     archivo_demanda = st.file_uploader(
         "Archivo Excel de demanda (hoja 'Demand')",
@@ -1941,7 +1941,7 @@ if seccion == "PronÃ³sticos PT":
 
 
 
-        if st.button("Generar pronÃ³stico de PT"):
+        if st.button("Generar pronostico de PT"):
 
           
 
@@ -1962,7 +1962,7 @@ if seccion == "PronÃ³sticos PT":
 
     # Mostrar resultados si ya existen
     if 'df_resumen_pt' in st.session_state:
-        st.subheader("Resumen del pronÃ³stico PT")
+        st.subheader("Resumen del pronostico PT")
         st.dataframe(st.session_state['df_resumen_pt'], use_container_width=True)
 
 
@@ -1994,19 +1994,19 @@ if seccion == "PronÃ³sticos PT":
 # ----------------------------
 # PESTAÃA MATERIA PRIMA
 # ----------------------------
-elif seccion == "PronÃ³sticos MP":
+elif seccion == "Pronosticos MP":
     st.subheader("Materia prima desde archivo de demanda consolidado")
-    st.caption("La BOM se toma de la hoja 'Products & Materials' del Excel cargado en PronÃ³sticos PT.")
+    st.caption("La BOM se toma de la hoja 'Products & Materials' del Excel cargado en Pronosticos PT.")
 
 
 
     if st.button("Ejecutar explosiÃ³n de materiales"):
         try:
             if "df" not in st.session_state:
-                st.warning("Primero debes generar el pronÃ³stico de Producto Terminado.")
+                st.warning("Primero debes generar el pronostico de Producto Terminado.")
                 st.stop()
             if "df_bom_vertical" not in st.session_state:
-                st.warning("No se encontrÃ³ BOM en session_state. Vuelve a cargar el Excel en PronÃ³sticos PT.")
+                st.warning("No se encontro BOM en session_state. Vuelve a cargar el Excel en Pronosticos PT.")
                 st.stop()
 
 
@@ -2028,7 +2028,7 @@ elif seccion == "PronÃ³sticos MP":
 
 
 
-        if st.button("Generar pronÃ³stico de MP"):
+        if st.button("Generar pronostico de MP"):
             try:
                 df_consumo = st.session_state["df_consumo"]
                 df_bom_vertical = st.session_state["df_bom_vertical"]
@@ -2057,7 +2057,7 @@ elif seccion == "PronÃ³sticos MP":
                 st.error(f"Error durante el pronÃ³stico: {e}")
     # Mostrar resultados si ya existen
     if 'df_resumen_mp' in st.session_state:
-        st.subheader("Resumen del pronÃ³stico MP")
+        st.subheader("Resumen del pronostico MP")
         st.dataframe(st.session_state['df_resumen_mp'], use_container_width=True)
 
 
@@ -2098,7 +2098,7 @@ elif seccion == "Capacidad Procesos Planta":
         "de la hoja 'Production' del gameplay-export."
     )
     if "resultados_pt" not in st.session_state:
-        st.warning("Primero genera el pronóstico de Producto Terminado en la pestaña PT.")
+        st.warning("Primero genera el pronostico de Producto Terminado en la pestana PT.")
         st.stop()
     if "df_tiempos_prod" not in st.session_state or "df_capacidad_proc" not in st.session_state:
         st.warning("No se encontraron tiempos/capacidades de Production. Vuelve a cargar el Excel en PT.")
