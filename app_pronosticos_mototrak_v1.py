@@ -1256,7 +1256,7 @@ def crear_dicc_mp(df_consumo):
 
 
 # %%
-def crear_pronosticos_generico_legacy(series_dict, periodos_atras=48, lags=6):
+def crear_pronosticos_generico_legacy(series_dict, periodos_atras=48, lags=6, modelos_seleccionados=None):
     """
     Implementación original de backtesting por serie (fallback).
     """
@@ -1426,7 +1426,7 @@ def crear_pronosticos_generico_legacy(series_dict, periodos_atras=48, lags=6):
 
 
 # %%
-def crear_pronosticos_generico(series_dict, periodos_atras=48, lags=6):
+def crear_pronosticos_generico(series_dict, periodos_atras=48, lags=6, modelos_seleccionados=None):
     """
     Aplica validación cruzada temporal global (una sola corrida para todas las series)
     usando StatsForecast (Nixtla).
@@ -1439,7 +1439,10 @@ def crear_pronosticos_generico(series_dict, periodos_atras=48, lags=6):
             HoltWinters,
             WindowAverage,
             MSTL,
-            SimpleExponentialSmoothingOptimized
+            SimpleExponentialSmoothingOptimized,
+            AutoARIMA,
+            AutoTheta,
+            DynamicOptimizedTheta
         )
     except Exception as e:
         if USANDO_STREAMLIT:
@@ -1447,7 +1450,12 @@ def crear_pronosticos_generico(series_dict, periodos_atras=48, lags=6):
                 f"No se pudo importar StatsForecast/Nixtla ({e}). "
                 "Se usará el método legacy por serie."
             )
-        return crear_pronosticos_generico_legacy(series_dict, periodos_atras=periodos_atras, lags=lags)
+        return crear_pronosticos_generico_legacy(
+            series_dict,
+            periodos_atras=periodos_atras,
+            lags=lags,
+            modelos_seleccionados=modelos_seleccionados
+        )
 
 
 
@@ -1500,16 +1508,33 @@ def crear_pronosticos_generico(series_dict, periodos_atras=48, lags=6):
 
 
 
-    modelos = [
-        Holt(alias='hw'),
-        HoltWinters(season_length=13, alias='hw_13'),
-        WindowAverage(window_size=3, alias='wa_3'),
-        WindowAverage(window_size=6, alias='wa_6'),
-        WindowAverage(window_size=12, alias='wa_12'),
-        SimpleExponentialSmoothingOptimized(alias='ses'),
-        MSTL(season_length=13, alias='mstl'),
-    ]
-    nombres_modelos = ['hw', 'hw_13', 'wa_3', 'wa_6', 'wa_12', 'ses', 'mstl']
+    modelos_default = ['hw', 'hw_13', 'wa_3', 'wa_6', 'wa_12', 'ses', 'mstl']
+    modelos_ids = [m.lower() for m in (modelos_seleccionados or modelos_default)]
+
+    builders = {
+        'hw': lambda: Holt(alias='hw'),
+        'hw_13': lambda: HoltWinters(season_length=13, alias='hw_13'),
+        'wa_3': lambda: WindowAverage(window_size=3, alias='wa_3'),
+        'wa_6': lambda: WindowAverage(window_size=6, alias='wa_6'),
+        'wa_12': lambda: WindowAverage(window_size=12, alias='wa_12'),
+        'ses': lambda: SimpleExponentialSmoothingOptimized(alias='ses'),
+        'mstl': lambda: MSTL(season_length=13, alias='mstl'),
+        # Se aproxima SARIMAX con AutoARIMA estacional.
+        'autoarima': lambda: AutoARIMA(season_length=1, alias='autoarima'),
+        'sarimax': lambda: AutoARIMA(season_length=13, alias='sarimax'),
+        'theta': lambda: AutoTheta(season_length=13, alias='theta'),
+        'doc': lambda: DynamicOptimizedTheta(season_length=13, alias='doc'),
+    }
+
+    modelos = []
+    nombres_modelos = []
+    for m in modelos_ids:
+        if m in builders:
+            modelos.append(builders[m]())
+            nombres_modelos.append(m)
+
+    if not modelos:
+        raise ValueError("No hay modelos válidos seleccionados para pronóstico.")
 
 
 
@@ -1541,14 +1566,11 @@ def crear_pronosticos_generico(series_dict, periodos_atras=48, lags=6):
         )
     except Exception:
         # Fallback global sin modelos estacionales si hay series cortas.
-        modelos_fallback = [
-            Holt(alias='hw'),
-            WindowAverage(window_size=3, alias='wa_3'),
-            WindowAverage(window_size=6, alias='wa_6'),
-            WindowAverage(window_size=12, alias='wa_12'),
-            SimpleExponentialSmoothingOptimized(alias='ses'),
-        ]
-        nombres_modelos = ['hw', 'wa_3', 'wa_6', 'wa_12', 'ses']
+        fallback_ids = [m for m in nombres_modelos if m in {'hw', 'wa_3', 'wa_6', 'wa_12', 'ses', 'autoarima'}]
+        if not fallback_ids:
+            fallback_ids = ['hw']
+        modelos_fallback = [builders[m]() for m in fallback_ids]
+        nombres_modelos = fallback_ids
         sf = StatsForecast(models=modelos_fallback, freq=1, n_jobs=-1)
         cv_df = sf.cross_validation(
             df=df_sf,
@@ -1896,6 +1918,16 @@ st.set_page_config(page_title="App de Pronósticos Mototrak", layout="wide")
 st.title("App de Pronósticos para Producto Terminado y Materia Prima")
 #pestaña_pt, pestaña_mp = st.tabs(["Pronósticos PT", "Pronósticos MP"])
 seccion = st.sidebar.radio("Selecciona sección", ["Pronósticos PT", "Pronósticos MP", "Capacidad Procesos Planta"])
+modelos_disponibles = ['hw', 'hw_13', 'wa_3', 'wa_6', 'wa_12', 'ses', 'mstl', 'autoarima', 'sarimax', 'theta', 'doc']
+modelos_default = ['hw', 'hw_13', 'wa_3', 'wa_6', 'wa_12', 'ses', 'mstl']
+modelos_seleccionados = st.sidebar.multiselect(
+    "Modelos de pronóstico",
+    options=modelos_disponibles,
+    default=modelos_default
+)
+if not modelos_seleccionados:
+    st.sidebar.warning("Selecciona al menos un modelo. Se usará la selección por defecto.")
+    modelos_seleccionados = modelos_default
 # ----------------------------
 # PESTAÑA PRODUCTO TERMINADO
 # ----------------------------
@@ -1945,7 +1977,12 @@ if seccion == "Pronósticos PT":
 
           
 
-            resultados_pt = crear_pronosticos_generico(series_dict_pt, periodos_atras_pt, lags_pt)
+            resultados_pt = crear_pronosticos_generico(
+                series_dict_pt,
+                periodos_atras_pt,
+                lags_pt,
+                modelos_seleccionados=modelos_seleccionados
+            )
             df_resumen_pt = generar_resumen_pt(resultados_pt)
 
 
@@ -2036,7 +2073,12 @@ elif seccion == "Pronósticos MP":
 
 
                 series_dict_mp = crear_dicc_mp(df_consumo)
-                resultados_mp = crear_pronosticos_generico(series_dict_mp, periodos_atras_mp, lags_mp)
+                resultados_mp = crear_pronosticos_generico(
+                    series_dict_mp,
+                    periodos_atras_mp,
+                    lags_mp,
+                    modelos_seleccionados=modelos_seleccionados
+                )
                 df_resumen_mp = generar_resumen_mp(resultados_mp)
 
 
