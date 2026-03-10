@@ -1514,7 +1514,7 @@ def crear_pronosticos_generico(series_dict, periodos_atras=48, lags=6):
 
 
     if USANDO_STREAMLIT:
-        progreso.markdown("ð Ejecutando cross_validation global con Nixtla...")
+        progreso.markdown("🔄 Ejecutando cross_validation global con Nixtla...")
         barra.progress(0.35)
     else:
         print("Ejecutando cross_validation global con Nixtla...")
