@@ -675,131 +675,190 @@ def crear_dicc_mp(df_consumo):
 # %%
 def crear_pronosticos_generico(series_dict, periodos_atras=48, lags=6):
     """
-    Aplica modelos de pronóstico sobre un diccionario de series univariadas.
+    Aplica validación cruzada temporal global (una sola corrida para todas las series)
+    usando StatsForecast (Nixtla).
     Funciona tanto para productos terminados como materias primas.
     """
+    try:
+        from statsforecast import StatsForecast
+        from statsforecast.models import (
+            Holt,
+            HoltWinters,
+            WindowAverage,
+            MSTL,
+            SimpleExponentialSmoothingOptimized
+        )
+    except Exception as e:
+        raise ImportError(f"No se pudo importar StatsForecast/Nixtla: {e}")
 
-    turnos = next(iter(series_dict.values())).index.tolist()
-    rango_turnos = turnos[-(periodos_atras + 1):]
-    resultados_por_serie = {}
+    if not series_dict:
+        return {}
 
-    # Widgets dinámicos solo si estás en Streamlit
     progreso = st.empty() if USANDO_STREAMLIT else None
     barra = st.progress(0) if USANDO_STREAMLIT else None
-    total = len(series_dict)
+    if USANDO_STREAMLIT:
+        progreso.markdown("👨‍💻 Preparando series para CV global...")
+        barra.progress(0.1)
+    else:
+        print("Preparando series para CV global...")
 
-    for i, (clave, serie) in enumerate(series_dict.items()):
-        if USANDO_STREAMLIT:
-            progreso.markdown(f"👨‍💻 Analizando `{clave}`...")
-            barra.progress((i + 1) / total)
-        else:
-            print(f"👨‍💻 Analizando {clave}")
+    # Empaquetar todas las series en formato largo para StatsForecast.
+    frames = []
+    id_to_clave = {}
+    claves_ordenadas = list(series_dict.keys())
+    for i, clave in enumerate(claves_ordenadas):
+        serie = series_dict[clave].dropna().sort_index()
+        if serie.empty:
+            continue
 
-        resultados_hw, resultados_hw_13 = [], []
-        resultados_pm_3, resultados_pm_6, resultados_pm_12 = [], [], []
+        uid = f"s_{i}"
+        id_to_clave[uid] = clave
+        frame = pd.DataFrame({
+            'unique_id': uid,
+            'ds': pd.to_numeric(serie.index, errors='coerce'),
+            'y': pd.to_numeric(serie.values, errors='coerce')
+        }).dropna(subset=['ds', 'y'])
+        if frame.empty:
+            continue
+        frame['ds'] = frame['ds'].astype(int)
+        frames.append(frame)
 
-        for j, fecha_corte in enumerate(rango_turnos):
-            serie_corte = serie[serie.index <= fecha_corte].copy()
-            indice_real = serie_corte.index.copy()
-            serie_corte.index = pd.RangeIndex(start=0, stop=len(serie_corte))
+    if not frames:
+        return {}
 
-            inicio_pronostico = fecha_corte + 1
-            fin_pronostico = inicio_pronostico + lags - 1
+    df_sf = pd.concat(frames, ignore_index=True).sort_values(['unique_id', 'ds'])
 
-            if len(serie_corte) >= 10:
-                try:
-                    modelo_hw = ExponentialSmoothing(serie_corte, trend='add', seasonal=None).fit()
-                    forecast_hw = modelo_hw.forecast(lags)
-                    forecast_hw.index = range(inicio_pronostico, fin_pronostico + 1)
+    modelos = [
+        Holt(alias='hw'),
+        HoltWinters(season_length=13, alias='hw_13'),
+        WindowAverage(window_size=3, alias='wa_3'),
+        WindowAverage(window_size=6, alias='wa_6'),
+        WindowAverage(window_size=12, alias='wa_12'),
+        SimpleExponentialSmoothingOptimized(alias='ses'),
+        MSTL(season_length=13, alias='mstl'),
+    ]
+    nombres_modelos = ['hw', 'hw_13', 'wa_3', 'wa_6', 'wa_12', 'ses', 'mstl']
 
-                    modelo_hw_13 = ExponentialSmoothing(
-                        serie_corte, trend='add', seasonal='add', seasonal_periods=13
-                    ).fit()
-                    forecast_hw_13 = modelo_hw_13.forecast(lags)
-                    forecast_hw_13.index = range(inicio_pronostico, fin_pronostico + 1)
-                except:
-                    forecast_hw = pd.Series([np.nan] * lags, index=range(inicio_pronostico, fin_pronostico + 1))
-                    forecast_hw_13 = pd.Series([np.nan] * lags, index=range(inicio_pronostico, fin_pronostico + 1))
-            else:
-                forecast_hw = pd.Series([np.nan] * lags, index=range(inicio_pronostico, fin_pronostico + 1))
-                forecast_hw_13 = pd.Series([np.nan] * lags, index=range(inicio_pronostico, fin_pronostico + 1))
+    if USANDO_STREAMLIT:
+        progreso.markdown("🔄 Ejecutando cross_validation global con Nixtla...")
+        barra.progress(0.35)
+    else:
+        print("Ejecutando cross_validation global con Nixtla...")
 
-            serie_corte.index = indice_real
+    tamanos = df_sf.groupby('unique_id').size()
+    min_len = int(tamanos.min())
+    # Heurística para evitar fallo por 'tiny datasets' en CV.
+    n_windows_cv = max(1, min(int(periodos_atras), max(1, min_len - lags - 8)))
 
-            pm_3 = serie_corte.rolling(3).mean().iloc[-1] if len(serie_corte) >= 3 else np.nan
-            pm_6 = serie_corte.rolling(6).mean().iloc[-1] if len(serie_corte) >= 6 else np.nan
-            pm_12 = serie_corte.rolling(12).mean().iloc[-1] if len(serie_corte) >= 12 else np.nan
+    sf = StatsForecast(models=modelos, freq=1, n_jobs=-1)
 
-            pm_3_series = pd.Series([pm_3] * lags, index=range(inicio_pronostico, fin_pronostico + 1))
-            pm_6_series = pd.Series([pm_6] * lags, index=range(inicio_pronostico, fin_pronostico + 1))
-            pm_12_series = pd.Series([pm_12] * lags, index=range(inicio_pronostico, fin_pronostico + 1))
+    try:
+        cv_df = sf.cross_validation(
+            df=df_sf,
+            h=int(lags),
+            n_windows=int(n_windows_cv),
+            step_size=1
+        )
+    except Exception:
+        # Fallback global sin modelos estacionales si hay series cortas.
+        modelos_fallback = [
+            Holt(alias='hw'),
+            WindowAverage(window_size=3, alias='wa_3'),
+            WindowAverage(window_size=6, alias='wa_6'),
+            WindowAverage(window_size=12, alias='wa_12'),
+            SimpleExponentialSmoothingOptimized(alias='ses'),
+        ]
+        nombres_modelos = ['hw', 'wa_3', 'wa_6', 'wa_12', 'ses']
+        sf = StatsForecast(models=modelos_fallback, freq=1, n_jobs=-1)
+        cv_df = sf.cross_validation(
+            df=df_sf,
+            h=int(lags),
+            n_windows=int(n_windows_cv),
+            step_size=1
+        )
 
-            demanda_real = serie.loc[inicio_pronostico:fin_pronostico]
+    if USANDO_STREAMLIT:
+        progreso.markdown("📈 Generando pronóstico final global...")
+        barra.progress(0.75)
+    else:
+        print("Generando pronóstico final global...")
 
-            df_comb = pd.DataFrame({
-                'real': demanda_real,
-                'hw': forecast_hw,
-                'hw_13': forecast_hw_13,
-                'pm_3': pm_3_series,
-                'pm_6': pm_6_series,
-                'pm_12': pm_12_series,
-            })
+    forecast_df = sf.forecast(df=df_sf, h=int(lags))
+    forecast_cols = [c for c in forecast_df.columns if c not in ['unique_id', 'ds']]
+    nombres_modelos = [m for m in nombres_modelos if m in forecast_cols]
 
-            if j < len(rango_turnos) - 1:
-                df_comb = df_comb.dropna(subset=['real'])
-                resultados_hw.append(df_comb[['real', 'hw']])
-                resultados_hw_13.append(df_comb[['real', 'hw_13']])
-                resultados_pm_3.append(df_comb[['real', 'pm_3']])
-                resultados_pm_6.append(df_comb[['real', 'pm_6']])
-                resultados_pm_12.append(df_comb[['real', 'pm_12']])
-            else:
-                pronostico_final_hw = df_comb[['real', 'hw']]
-                pronostico_final_hw_13 = df_comb[['real', 'hw_13']]
-                pronostico_final_pm_3 = df_comb[['real', 'pm_3']]
-                pronostico_final_pm_6 = df_comb[['real', 'pm_6']]
-                pronostico_final_pm_12 = df_comb[['real', 'pm_12']]
+    resultados_por_serie = {}
 
-        modelos = {
-            'hw': (resultados_hw, pronostico_final_hw),
-            'hw_13': (resultados_hw_13, pronostico_final_hw_13),
-            'pm_3': (resultados_pm_3, pronostico_final_pm_3),
-            'pm_6': (resultados_pm_6, pronostico_final_pm_6),
-            'pm_12': (resultados_pm_12, pronostico_final_pm_12),
-        }
+    for uid, clave in id_to_clave.items():
+        serie_original = series_dict[clave].sort_index()
+        cv_uid = cv_df[cv_df['unique_id'] == uid].copy()
+        fc_uid = forecast_df[forecast_df['unique_id'] == uid].copy()
 
         metricas_modelos = {}
-        for nombre_modelo, (resultados, _) in modelos.items():
-            if resultados:
-                df_resultado = pd.concat(resultados)
-                df_resultado["error"] = df_resultado["real"] - df_resultado[nombre_modelo]
-                df_resultado["error_abs"] = df_resultado["error"].abs()
-                suma_real = df_resultado["real"].sum()
-                mae_porc = df_resultado["error_abs"].sum() / suma_real
-                sesgo_porc = df_resultado["error"].sum() / suma_real
-                score_porc = mae_porc + abs(sesgo_porc)
-                rmse = np.sqrt((df_resultado["error"] ** 2).mean())
-            else:
+        for nombre_modelo in nombres_modelos:
+            if nombre_modelo not in cv_uid.columns:
                 mae_porc = np.nan
                 sesgo_porc = np.nan
                 score_porc = np.inf
                 rmse = np.nan
+            else:
+                df_resultado = cv_uid[['y', nombre_modelo]].dropna().copy()
+                if df_resultado.empty:
+                    mae_porc = np.nan
+                    sesgo_porc = np.nan
+                    score_porc = np.inf
+                    rmse = np.nan
+                else:
+                    df_resultado["error"] = df_resultado["y"] - df_resultado[nombre_modelo]
+                    df_resultado["error_abs"] = df_resultado["error"].abs()
+                    suma_real = df_resultado["y"].sum()
+                    if suma_real == 0:
+                        mae_porc = np.nan
+                        sesgo_porc = np.nan
+                        score_porc = np.inf
+                    else:
+                        mae_porc = df_resultado["error_abs"].sum() / suma_real
+                        sesgo_porc = df_resultado["error"].sum() / suma_real
+                        score_porc = mae_porc + abs(sesgo_porc)
+                    rmse = np.sqrt((df_resultado["error"] ** 2).mean())
 
             metricas_modelos[nombre_modelo] = {
                 "mae_porc": mae_porc,
                 "sesgo_porc": sesgo_porc,
-                "score_porc": round(score_porc, 3),
+                "score_porc": round(score_porc, 3) if np.isfinite(score_porc) else np.inf,
                 "rmse": rmse
             }
 
         df_metricas = pd.DataFrame(metricas_modelos).T.sort_values("score_porc")
         mejor_modelo = df_metricas.index[0]
-        pronostico_final = modelos[mejor_modelo][1]
+
+        if not fc_uid.empty and mejor_modelo in fc_uid.columns:
+            fc_uid = fc_uid.sort_values('ds').set_index('ds')
+            real = serie_original.reindex(fc_uid.index)
+            pronostico_final = pd.DataFrame({
+                'real': real,
+                mejor_modelo: fc_uid[mejor_modelo]
+            })
+        else:
+            # Fallback defensivo para no romper flujos de reporte y gráfica.
+            ultimo_turno = int(serie_original.index.max())
+            idx_futuro = pd.Index(range(ultimo_turno + 1, ultimo_turno + int(lags) + 1))
+            pronostico_final = pd.DataFrame({
+                'real': serie_original.reindex(idx_futuro),
+                mejor_modelo: np.nan
+            }, index=idx_futuro)
 
         resultados_por_serie[clave] = {
             "mejor_modelo": mejor_modelo,
             "metricas": df_metricas,
             "pronostico_final": pronostico_final
         }
+
+    if USANDO_STREAMLIT:
+        barra.progress(1.0)
+        progreso.markdown("✅ CV global y pronóstico final completados.")
+    else:
+        print("CV global y pronóstico final completados.")
 
     return resultados_por_serie
 
