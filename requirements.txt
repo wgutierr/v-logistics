@@ -2,7 +2,7 @@ pandas==2.3.1
 numpy==2.3.2
 plotly==6.2.0
 statsmodels==0.14.5
-scipy==1.16.1
+scipy==1.15.3
 streamlit==1.47.1
 openpyxl==3.1.5
 statsforecast==2.0.3
