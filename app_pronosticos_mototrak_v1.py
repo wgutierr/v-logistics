@@ -1560,7 +1560,7 @@ def crear_pronosticos_generico(series_dict, periodos_atras=48, lags=6):
 
 
     if USANDO_STREAMLIT:
-        progreso.markdown("ð Generando pronóstico final global...")
+        progreso.markdown("📈 Generando pronóstico final global...")
         barra.progress(0.75)
     else:
         print("Generando pronóstico final global...")
