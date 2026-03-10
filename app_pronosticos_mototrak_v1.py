@@ -1018,7 +1018,7 @@ def graficar_pronosticos_mp(df, resultados_por_serie, colores_mp, lags=12):
 
 
 
-    # Disminuir tamaÃ±o de fuente de tÃ­tulos individuales
+    # Disminuir tamaño de fuente de títulos individuales
     for anotacion in fig['layout']['annotations']:
         anotacion['font'] = dict(size=11)
 
@@ -1180,12 +1180,12 @@ def graficar_capacidad_procesos(df_carga):
 
 
 # %% [markdown]
-# # Funciones de Ayuda para SelecciÃ³n de pronÃ³sticos de Producto terminado
+# # Funciones de Ayuda para Selección de pronósticos de Producto terminado
 
 
 
 # %% [markdown]
-# ## CreaciÃ³n de diccionario con series de tiempo producto-regional
+# ## Creación de diccionario con series de tiempo producto-regional
 
 
 
@@ -1251,7 +1251,7 @@ def crear_dicc_mp(df_consumo):
 
 # %% [markdown]
 # ## Backtesting
-# Se harÃ¡ backtesting desde n periodos hacia atras y generando mÃºltiples pronÃ³sticos hacia adelante (lags)
+# Se hará backtesting desde n periodos hacia atras y generando mÃºltiples pronÃ³sticos hacia adelante (lags)
 
 
 
@@ -1459,10 +1459,10 @@ def crear_pronosticos_generico(series_dict, periodos_atras=48, lags=6):
     progreso = st.empty() if USANDO_STREAMLIT else None
     barra = st.progress(0) if USANDO_STREAMLIT else None
     if USANDO_STREAMLIT:
-        progreso.markdown("ð¨âð» Preparando series para CV global...")
+        progreso.markdown("🔄Preparando series para CV global...")
         barra.progress(0.1)
     else:
-        print("Preparando series para CV global...")
+        print("👨‍💻Preparando series para CV global...")
 
 
 
@@ -1523,7 +1523,7 @@ def crear_pronosticos_generico(series_dict, periodos_atras=48, lags=6):
 
     tamanos = df_sf.groupby('unique_id').size()
     min_len = int(tamanos.min())
-    # HeurÃ­stica para evitar fallo por 'tiny datasets' en CV.
+    # Heurí­stica para evitar fallo por 'tiny datasets' en CV.
     n_windows_cv = max(1, min(int(periodos_atras), max(1, min_len - lags - 8)))
 
 
@@ -1894,10 +1894,10 @@ st.set_page_config(page_title="App de Pronósticos Mototrak", layout="wide")
 
 
 st.title("App de Pronósticos para Producto Terminado y Materia Prima")
-#pestaÃ±a_pt, pestaÃ±a_mp = st.tabs(["PronÃ³sticos PT", "PronÃ³sticos MP"])
+#pestaña_pt, pestaña_mp = st.tabs(["Pronósticos PT", "Pronósticos MP"])
 seccion = st.sidebar.radio("Selecciona sección", ["Pronósticos PT", "Pronósticos MP", "Capacidad Procesos Planta"])
 # ----------------------------
-# PESTAÃA PRODUCTO TERMINADO
+# PESTAÑA PRODUCTO TERMINADO
 # ----------------------------
 if seccion == "Pronósticos PT":
     st.subheader("Cargar archivo de demanda consolidado")
@@ -1967,7 +1967,7 @@ if seccion == "Pronósticos PT":
 
 
 
-        # Reconstruir grÃ¡fica si no estÃ¡ en session_state
+        # Reconstruir gráfica si no está en session_state
         if 'fig_pt' not in st.session_state:
             st.session_state['fig_pt'] = graficar_pronosticos_pt(
                 st.session_state['df'],
@@ -1984,7 +1984,7 @@ if seccion == "Pronósticos PT":
         buffer_pt = io.BytesIO()
         st.session_state['df_resumen_pt'].to_excel(buffer_pt, index=False)
         st.download_button(
-            "ð¥ Descargar resumen PT en Excel",
+            "📥 Descargar resumen PT en Excel",
             data=buffer_pt.getvalue(),
             file_name="resumen_pt.xlsx"
         )
@@ -2079,7 +2079,7 @@ elif seccion == "Pronósticos MP":
         buffer_mp = io.BytesIO()
         st.session_state['df_resumen_mp'].to_excel(buffer_mp, index=False)
         st.download_button(
-            "ð¥ Descargar resumen MP en Excel",
+            "📥 Descargar resumen MP en Excel",
             data=buffer_mp.getvalue(),
             file_name="resumen_mp.xlsx"
         )
