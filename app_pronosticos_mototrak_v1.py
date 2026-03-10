@@ -308,7 +308,7 @@ def cargar_bom_desde_excel_gameplay(archivo_excel, hoja='Products & Materials'):
 
 
     if header_idx is None:
-        raise ValueError("No se encontrÃ³ la tabla 'Product - Raw Material Relationship'.")
+        raise ValueError("No se encontró la tabla 'Product - Raw Material Relationship'.")
 
 
 
@@ -375,7 +375,7 @@ def cargar_produccion_desde_excel_gameplay(archivo_excel, hoja='Production'):
             header_idx = i
             break
     if header_idx is None:
-        raise ValueError("No se encontrÃ³ el encabezado de procesos en 'Production'.")
+        raise ValueError("No se encontró el encabezado de procesos en 'Production'.")
 
 
 
@@ -410,7 +410,7 @@ def cargar_produccion_desde_excel_gameplay(archivo_excel, hoja='Production'):
             disp_idx = i
             break
     if disp_idx is None:
-        raise ValueError("No se encontrÃ³ la fila de disponibilidad en 'Production'.")
+        raise ValueError("No se encontró la fila de disponibilidad en 'Production'.")
 
 
 
@@ -668,7 +668,7 @@ def graficar_demanda_pt(df, colores_pt):
 
 
     """
-    Crea un grÃ¡fico de lÃ­neas para la demanda de productos terminados
+    Crea un gráfico de lÃ­neas para la demanda de productos terminados
     por regionales y productos, utilizando Plotly.
     """
 
@@ -867,7 +867,7 @@ def graficar_pronosticos_pt(df, resultados_pt, colores_pt):
     # Layout final
     fig.update_layout(
         height=700, width=1200,
-        title_text="Demanda Real y PronÃ³stico por Regional y Producto",
+        title_text="Demanda Real y Pronóstico por Regional y Producto",
         showlegend=True,
         legend_title="Producto / Modelo",
         template="ggplot2"
@@ -895,12 +895,12 @@ def graficar_pronosticos_pt(df, resultados_pt, colores_pt):
 # %%
 def generar_colores_mp(elementos):
     """
-    Asigna colores Ãºnicos a cada elemento (producto o materia prima).
+    Asigna colores únicos a cada elemento (producto o materia prima).
     Usa una paleta de colores de Plotly.
 
     
 
-    ParÃ¡metro:
+    Parámetro:
     - elementos: lista o conjunto de nombres
 
     
@@ -932,7 +932,7 @@ def graficar_pronosticos_mp(df, resultados_por_serie, colores_mp, lags=12):
 
 
 
-    ParÃ¡metros:
+    Parámetros:
     - df: DataFrame con columnas ['Turn', 'MATERIA_PRIMA', 'DEMANDA_MATERIA_PRIMA']
     - resultados_por_serie: dict con claves = materia prima y valores con 'pronostico_final' y 'mejor_modelo'
     - colores_mp: dict {materia_prima: color}
@@ -1026,11 +1026,11 @@ def graficar_pronosticos_mp(df, resultados_por_serie, colores_mp, lags=12):
 
     fig.update_layout(
         height=300 * rows, width=1200,
-        title_text="Consumo y PronÃ³stico por Materia Prima",
+        title_text="Consumo y Pronóstico por Materia Prima",
         showlegend=False,
         legend_title="Materia Prima / Modelo",
         template="ggplot2",
-        font=dict(size=12)  # Solo afecta ejes, leyenda, tÃ­tulo general
+        font=dict(size=12)  # Solo afecta ejes, leyenda, título general
     )
     fig.update_xaxes(title_text="Turn")
     fig.update_yaxes(title_text="Demanda")
@@ -1045,7 +1045,7 @@ def graficar_pronosticos_mp(df, resultados_por_serie, colores_mp, lags=12):
 
 def construir_pronostico_pt_planta(resultados_pt):
     """
-    Construye un DataFrame largo con pronÃ³stico de unidades por turno y producto
+    Construye un DataFrame largo con pronóstico de unidades por turno y producto
     para planta (prioriza REGIONAL='MOTOTRAK').
     """
     productos = ['MOTO', 'CUATRIMOTO', 'TRACTOR']
@@ -1096,7 +1096,7 @@ def construir_pronostico_pt_planta(resultados_pt):
 
 def calcular_carga_procesos_planta(df_pron_pt, df_tiempos_prod, df_capacidad_proc):
     """
-    Convierte pronÃ³stico de PT a minutos requeridos por proceso y turno.
+    Convierte pronóstico de PT a minutos requeridos por proceso y turno.
     """
     if df_pron_pt.empty:
         return pd.DataFrame(columns=['Turn', 'PROCESO', 'MIN_REQUERIDOS', 'CAPACIDAD_MIN'])
@@ -1121,7 +1121,7 @@ def calcular_carga_procesos_planta(df_pron_pt, df_tiempos_prod, df_capacidad_pro
 
 def graficar_capacidad_procesos(df_carga):
     """
-    Grafica carga (min requeridos) vs capacidad (lÃ­nea horizontal por proceso).
+    Grafica carga (min requeridos) vs capacidad (línea horizontal por proceso).
     """
     procesos = sorted(df_carga['PROCESO'].dropna().unique().tolist())
     if not procesos:
@@ -1258,7 +1258,7 @@ def crear_dicc_mp(df_consumo):
 # %%
 def crear_pronosticos_generico_legacy(series_dict, periodos_atras=48, lags=6):
     """
-    ImplementaciÃ³n original de backtesting por serie (fallback).
+    Implementación original de backtesting por serie (fallback).
     """
     turnos = next(iter(series_dict.values())).index.tolist()
     rango_turnos = turnos[-(periodos_atras + 1):]
@@ -1428,7 +1428,7 @@ def crear_pronosticos_generico_legacy(series_dict, periodos_atras=48, lags=6):
 # %%
 def crear_pronosticos_generico(series_dict, periodos_atras=48, lags=6):
     """
-    Aplica validaciÃ³n cruzada temporal global (una sola corrida para todas las series)
+    Aplica validación cruzada temporal global (una sola corrida para todas las series)
     usando StatsForecast (Nixtla).
     Funciona tanto para productos terminados como materias primas.
     """
@@ -1445,7 +1445,7 @@ def crear_pronosticos_generico(series_dict, periodos_atras=48, lags=6):
         if USANDO_STREAMLIT:
             st.warning(
                 f"No se pudo importar StatsForecast/Nixtla ({e}). "
-                "Se usarÃ¡ el mÃ©todo legacy por serie."
+                "Se usará el método legacy por serie."
             )
         return crear_pronosticos_generico_legacy(series_dict, periodos_atras=periodos_atras, lags=lags)
 
@@ -1560,10 +1560,10 @@ def crear_pronosticos_generico(series_dict, periodos_atras=48, lags=6):
 
 
     if USANDO_STREAMLIT:
-        progreso.markdown("ð Generando pronÃ³stico final global...")
+        progreso.markdown("ð Generando pronóstico final global...")
         barra.progress(0.75)
     else:
-        print("Generando pronÃ³stico final global...")
+        print("Generando pronóstico final global...")
 
 
 
@@ -1659,7 +1659,7 @@ def crear_pronosticos_generico(series_dict, periodos_atras=48, lags=6):
 
         progreso.markdown("CV global y pronostico final completados.")
     else:
-        print("CV global y pronÃ³stico final completados.")
+        print("CV global y pronóstico final completados.")
 
 
 
@@ -1680,7 +1680,7 @@ def crear_pronosticos_generico(series_dict, periodos_atras=48, lags=6):
 # %%
 def generar_resumen_pt(resultados_pt):
     """
-    Genera un DataFrame resumen con los mejores modelos y pronÃ³sticos finales   
+    Genera un DataFrame resumen con los mejores modelos y pronósticos finales   
     """
 
 
@@ -1743,7 +1743,7 @@ def generar_resumen_pt(resultados_pt):
 # %%
 def generar_resumen_mp(resultados_mp):
     """
-    Genera un DataFrame resumen con los mejores modelos y pronÃ³sticos finales para materias primas
+    Genera un DataFrame resumen con los mejores modelos y pronósticos finales para materias primas
     """
 
 
@@ -1908,7 +1908,7 @@ if seccion == "Pronósticos PT":
 
 
 
-    periodos_atras_pt = st.number_input("Periodos hacia atrÃ¡s para backtesting (PT)", min_value=1, max_value=60, value=12)
+    periodos_atras_pt = st.number_input("Periodos hacia atrás para backtesting (PT)", min_value=1, max_value=60, value=12)
     lags_pt = st.number_input("Cantidad de periodos a pronosticar (lags PT)", min_value=1, max_value=24, value=6)
 
 
@@ -2000,13 +2000,13 @@ elif seccion == "Pronósticos MP":
 
 
 
-    if st.button("Ejecutar explosiÃ³n de materiales"):
+    if st.button("Ejecutar explosión de materiales"):
         try:
             if "df" not in st.session_state:
                 st.warning("Primero debes generar el pronóstico de Producto Terminado.")
                 st.stop()
             if "df_bom_vertical" not in st.session_state:
-                st.warning("No se encontr? BOM en session_state. Vuelve a cargar el Excel en Pronósticos PT.")
+                st.warning("No se encontró BOM en session_state. Vuelve a cargar el Excel en Pronósticos PT.")
                 st.stop()
 
 
@@ -2015,15 +2015,15 @@ elif seccion == "Pronósticos MP":
             df_bom_vertical = st.session_state["df_bom_vertical"]
             df_consumo = explosionar_mp(df, df_bom_vertical)
             st.session_state["df_consumo"] = df_consumo
-            st.success("ExplosiÃ³n realizada con Ã©xito")
+            st.success("Explosión realizada con éxito")
         except Exception as e:
-            st.error(f"Error durante la explosiÃ³n de materiales: {e}")
+            st.error(f"Error durante la explosión de materiales: {e}")
 
 
 
-    # ParÃ¡metros visibles siempre que haya datos disponibles
+    # Parámetros visibles siempre que haya datos disponibles
     if "df_consumo" in st.session_state and "df_bom_vertical" in st.session_state:
-        periodos_atras_mp = st.number_input("Periodos hacia atrÃ¡s para backtesting (MP)", min_value=1, max_value=60, value=12)
+        periodos_atras_mp = st.number_input("Periodos hacia atrás para backtesting (MP)", min_value=1, max_value=60, value=12)
         lags_mp = st.number_input("Cantidad de periodos a pronosticar (lags MP)", min_value=1, max_value=24, value=6)
 
 
