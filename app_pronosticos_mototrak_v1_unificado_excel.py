@@ -70,128 +70,81 @@ def cargar_demandas(ruta_demandas):
 
 
 # %%
-def cargar_demandas_por_region(archivo_norte, archivo_centro, archivo_sur):
-    
+def cargar_demandas_desde_excel(archivo_excel, sheet_name="Demand"):
+    """Carga demanda desde un único archivo Excel (export del juego).
+
+    Espera una hoja (por defecto 'Demand') con el layout típico:
+    - Fila 0: títulos por bloque/región (ej: '🏪 MotoTrak Sur', '🏪 MotoTrak Centro', '🏪 MotoTrak Norte')
+    - Fila 1: encabezados ('Turn', 'MOTO', 'CUATRIMOTO', 'TRACTOR')
+    - Filas 2+: datos numéricos
+
+    Retorna un DataFrame concatenado con columnas:
+    Turn, MOTO, CUATRIMOTO, TRACTOR, REGIONAL
     """
-    Carga y concatena los archivos de demanda por región (NORTE, CENTRO, SUR) 
-    desde archivos subidos vía Streamlit.
-    """
 
-    dataframes = []
+    df_raw = pd.read_excel(archivo_excel, sheet_name=sheet_name, header=None)
 
-    archivos = {
-        'NORTE': archivo_norte,
-        'CENTRO': archivo_centro,
-        'SUR': archivo_sur
-    }
+    if df_raw.shape[0] < 3:
+        raise ValueError(f"La hoja '{sheet_name}' no tiene suficientes filas para interpretar encabezados y datos.")
 
-    for region, archivo in archivos.items():
-        if archivo is not None:
-            df = pd.read_csv(archivo)
-            df['REGIONAL'] = region
-            st.write(f"✅ Último turno cargado para {region}: {df['Turn'].max()}")
-            dataframes.append(df)
+    # Fila 0: regiones (con NaN en columnas intermedias) -> forward-fill
+    regiones = df_raw.iloc[0].ffill().astype(str)
 
-    df_agregado = pd.concat(dataframes, ignore_index=True)
+    # Fila 1: nombres de campos
+    campos = df_raw.iloc[1].astype(str)
+
+    # Datos
+    df_data = df_raw.iloc[2:].copy()
+    df_data.columns = pd.MultiIndex.from_arrays([regiones, campos])
+
+    # Normalizar nombres de región
+    def normalizar_region(txt: str) -> str:
+        t = (txt or "").upper()
+        if "SUR" in t:
+            return "SUR"
+        if "CENTRO" in t:
+            return "CENTRO"
+        if "NORTE" in t:
+            return "NORTE"
+        return txt  # fallback
+
+    df_list = []
+    for region_raw in df_data.columns.get_level_values(0).unique():
+        region = normalizar_region(region_raw)
+        cols_region = [c for c in df_data.columns if c[0] == region_raw]
+        df_region = df_data[cols_region].copy()
+        df_region.columns = [c[1] for c in df_region.columns]
+
+        cols_keep = [c for c in ["Turn", "MOTO", "CUATRIMOTO", "TRACTOR"] if c in df_region.columns]
+        df_region = df_region[cols_keep].copy()
+
+        if "Turn" not in df_region.columns:
+            continue
+
+        df_region["REGIONAL"] = region
+        df_list.append(df_region)
+
+    if not df_list:
+        raise ValueError(f"No se pudieron interpretar regiones/columnas en la hoja '{sheet_name}'.")
+
+    df_agregado = pd.concat(df_list, ignore_index=True)
+
+    # Tipos
+    df_agregado["Turn"] = pd.to_numeric(df_agregado["Turn"], errors="coerce").astype("Int64")
+    for col in ["MOTO", "CUATRIMOTO", "TRACTOR"]:
+        if col in df_agregado.columns:
+            df_agregado[col] = pd.to_numeric(df_agregado[col], errors="coerce")
+
+    df_agregado = df_agregado.dropna(subset=["Turn"]).copy()
+    df_agregado["Turn"] = df_agregado["Turn"].astype(int)
+
+    if USANDO_STREAMLIT:
+        for reg in ["NORTE", "CENTRO", "SUR"]:
+            if reg in df_agregado["REGIONAL"].unique():
+                st.write(f"✅ Último turno cargado para {reg}: {int(df_agregado[df_agregado['REGIONAL']==reg]['Turn'].max())}")
 
     return df_agregado
 
-
-def _normalizar_nombre_regional(nombre):
-    """
-    Normaliza etiquetas de regional a NORTE, CENTRO o SUR.
-    """
-    if pd.isna(nombre):
-        return None
-
-    texto = str(nombre).strip().upper()
-    if "NORTE" in texto:
-        return "NORTE"
-    if "CENTRO" in texto:
-        return "CENTRO"
-    if "SUR" in texto:
-        return "SUR"
-    return None
-
-
-def cargar_demandas_desde_excel_demanda(archivo_excel, hoja='Demand'):
-    """
-    Carga la demanda de PT desde un único Excel (hoja 'Demand').
-
-    Soporta dos estructuras:
-    1) Formato tabular con columnas REGIONAL, Turn, MOTO, CUATRIMOTO, TRACTOR.
-    2) Formato en bloques por regional (Sur/Centro/Norte) con dos filas de encabezado.
-    """
-
-    # Intento 1: formato tabular directo.
-    df_tabular = pd.read_excel(archivo_excel, sheet_name=hoja)
-    columnas_tabular = {str(c).strip().upper(): c for c in df_tabular.columns}
-    if 'REGIONAL' in columnas_tabular and 'TURN' in columnas_tabular:
-        df_tabular = df_tabular.rename(columns={v: k for k, v in columnas_tabular.items()})
-        df_tabular['REGIONAL'] = df_tabular['REGIONAL'].astype(str).str.upper().str.strip()
-        st.write(
-            "✅ Último turno cargado por regional:",
-            df_tabular.groupby('REGIONAL')['TURN'].max().to_dict()
-        )
-        # Mantener nombre de columna esperado en el resto del pipeline.
-        return df_tabular.rename(columns={'TURN': 'Turn'})
-
-    # Intento 2: formato por bloques regionales.
-    archivo_excel.seek(0)
-    df_raw = pd.read_excel(archivo_excel, sheet_name=hoja, header=None)
-
-    if df_raw.shape[0] < 3:
-        raise ValueError("La hoja 'Demand' no tiene el formato esperado.")
-
-    fila_regionales = df_raw.iloc[0]
-    fila_columnas = df_raw.iloc[1]
-
-    turn_cols = [
-        i for i, val in enumerate(fila_columnas)
-        if str(val).strip().upper() == 'TURN'
-    ]
-
-    if not turn_cols:
-        raise ValueError("No se encontraron columnas 'Turn' en la hoja 'Demand'.")
-
-    dataframes = []
-    n_cols = df_raw.shape[1]
-
-    for idx, col_inicio in enumerate(turn_cols):
-        col_fin = turn_cols[idx + 1] if idx + 1 < len(turn_cols) else n_cols
-
-        regional = _normalizar_nombre_regional(fila_regionales.iloc[col_inicio])
-        if regional is None:
-            continue
-
-        encabezados = [
-            str(c).strip().upper()
-            for c in fila_columnas.iloc[col_inicio:col_fin].tolist()
-        ]
-        bloque = df_raw.iloc[2:, col_inicio:col_fin].copy()
-        bloque.columns = encabezados
-
-        if 'TURN' not in bloque.columns:
-            continue
-
-        bloque = bloque.dropna(subset=['TURN'])
-        bloque['TURN'] = pd.to_numeric(bloque['TURN'], errors='coerce')
-        bloque = bloque.dropna(subset=['TURN'])
-        bloque['TURN'] = bloque['TURN'].astype(int)
-
-        for col in ['MOTO', 'CUATRIMOTO', 'TRACTOR']:
-            if col in bloque.columns:
-                bloque[col] = pd.to_numeric(bloque[col], errors='coerce')
-
-        bloque['REGIONAL'] = regional
-        dataframes.append(bloque)
-        st.write(f"✅ Último turno cargado para {regional}: {bloque['TURN'].max()}")
-
-    if not dataframes:
-        raise ValueError("No se pudo extraer demanda por regional desde la hoja 'Demand'.")
-
-    df_agregado = pd.concat(dataframes, ignore_index=True)
-    return df_agregado.rename(columns={'TURN': 'Turn'})
 
 # %% [markdown]
 # ## Carga de datos maestros
@@ -976,28 +929,44 @@ seccion = st.sidebar.radio("Selecciona sección", ["Pronósticos PT", "Pronósti
 # PESTAÑA PRODUCTO TERMINADO
 # ----------------------------
 if seccion == "Pronósticos PT":
-    st.subheader("Cargar archivo de demanda consolidado")
-    archivo_demanda = st.file_uploader(
-        "Archivo Excel de demanda (hoja 'Demand')",
-        type=["xlsx"]
+
+    st.subheader("Cargar archivo único de demanda (Excel export del juego)")
+    archivo_demanda = st.file_uploader("Archivo gameplay-export (Excel)", type=["xlsx"])
+
+    periodos_atras_pt = st.number_input(
+        "Periodos hacia atrás para backtesting (PT)", min_value=1, max_value=60, value=12
+    )
+    lags_pt = st.number_input(
+        "Cantidad de periodos a pronosticar (lags PT)", min_value=1, max_value=24, value=6
     )
 
-    periodos_atras_pt = st.number_input("Periodos hacia atrás para backtesting (PT)", min_value=1, max_value=60, value=12)
-    lags_pt = st.number_input("Cantidad de periodos a pronosticar (lags PT)", min_value=1, max_value=24, value=6)
-
     if archivo_demanda:
+
         productos = ['MOTO', 'CUATRIMOTO', 'TRACTOR']
-        df_agregado = cargar_demandas_desde_excel_demanda(archivo_demanda, hoja='Demand')
+
+        df_agregado = cargar_demandas_desde_excel(
+            archivo_demanda, sheet_name='Demand'
+        )
+
         df_final = preprocesar_datos_parte_1(df_agregado, productos)
         df = preprocesar_datos_parte_2(df_final)
+
         st.session_state["df"] = df
 
-        colores_pt = {'MOTO': 'salmon', 'CUATRIMOTO': 'navy', 'TRACTOR': 'darkcyan'}
+        colores_pt = {
+            'MOTO': 'salmon',
+            'CUATRIMOTO': 'navy',
+            'TRACTOR': 'darkcyan'
+        }
+
         series_dict_pt = crear_dicc_pt(df)
 
         if st.button("Generar pronóstico de PT"):
-          
-            resultados_pt = crear_pronosticos_generico(series_dict_pt, periodos_atras_pt, lags_pt)
+
+            resultados_pt = crear_pronosticos_generico(
+                series_dict_pt, periodos_atras_pt, lags_pt
+            )
+
             df_resumen_pt = generar_resumen_pt(resultados_pt)
 
             st.session_state['resultados_pt'] = resultados_pt
@@ -1008,10 +977,14 @@ if seccion == "Pronósticos PT":
 
     # Mostrar resultados si ya existen
     if 'df_resumen_pt' in st.session_state:
-        st.subheader("Resumen del pronóstico PT")
-        st.dataframe(st.session_state['df_resumen_pt'], use_container_width=True)
 
-        # Reconstruir gráfica si no está en session_state
+        st.subheader("Resumen del pronóstico PT")
+
+        st.dataframe(
+            st.session_state['df_resumen_pt'],
+            use_container_width=True
+        )
+
         if 'fig_pt' not in st.session_state:
             st.session_state['fig_pt'] = graficar_pronosticos_pt(
                 st.session_state['df'],
@@ -1019,90 +992,17 @@ if seccion == "Pronósticos PT":
                 {'MOTO': 'salmon', 'CUATRIMOTO': 'navy', 'TRACTOR': 'darkcyan'}
             )
 
-        st.plotly_chart(st.session_state['fig_pt'], use_container_width=True)
+        st.plotly_chart(
+            st.session_state['fig_pt'],
+            use_container_width=True
+        )
 
         buffer_pt = io.BytesIO()
         st.session_state['df_resumen_pt'].to_excel(buffer_pt, index=False)
+
         st.download_button(
             "📥 Descargar resumen PT en Excel",
             data=buffer_pt.getvalue(),
             file_name="resumen_pt.xlsx"
-        )
-
-# ----------------------------
-# PESTAÑA MATERIA PRIMA
-# ----------------------------
-elif seccion == "Pronósticos MP":
-    st.subheader("Cargar archivo maestro de datos")
-    archivo_maestro = st.file_uploader("Archivo Excel (Info Maestra)", type=["xlsx"])
-
-    if archivo_maestro:
-        df_bom_mp, df_m_d_o, df_transporte, df_almacenamiento = cargar_data_maestra(archivo_maestro)
-        df_bom_vertical = preprocesar_datos_mp(df_bom_mp)
-        st.session_state["df_bom_vertical"] = df_bom_vertical  # 💾 Guardar en session_state
-
-        if st.button("Ejecutar explosión de materiales"):
-            try:
-                if "df" not in st.session_state:
-                    st.warning("Primero debes generar el pronóstico de Producto Terminado.")
-                    st.stop()
-
-                df = st.session_state["df"]
-                df_consumo = explosionar_mp(df, df_bom_vertical)
-                st.session_state["df_consumo"] = df_consumo  # 💾 Guardar en session_state
-                st.success("Explosión realizada con éxito")
-            except Exception as e:
-                st.error(f"Error durante la explosión de materiales: {e}")
-
-        # Parámetros visibles siempre que haya datos disponibles
-        if "df_consumo" in st.session_state and "df_bom_vertical" in st.session_state:
-            periodos_atras_mp = st.number_input("Periodos hacia atrás para backtesting (MP)", min_value=1, max_value=60, value=12)
-            lags_mp = st.number_input("Cantidad de periodos a pronosticar (lags MP)", min_value=1, max_value=24, value=6)
-
-            if st.button("Generar pronóstico de MP"):
-                try:
-                    df_consumo = st.session_state["df_consumo"]
-                    df_bom_vertical = st.session_state["df_bom_vertical"]
-
-                    series_dict_mp = crear_dicc_mp(df_consumo)                  
-                    resultados_mp = crear_pronosticos_generico(series_dict_mp, periodos_atras_mp, lags_mp)
-                    df_resumen_mp = generar_resumen_mp(resultados_mp)
-
-                    st.session_state['resultados_mp'] = resultados_mp
-                    st.session_state['df_resumen_mp'] = df_resumen_mp
-
-                    colores_mp = generar_colores_mp(df_bom_vertical['MATERIA_PRIMA'].unique())
-                    st.session_state['colores_mp'] = colores_mp
-
-                    fig = graficar_pronosticos_mp(df_consumo, resultados_mp, colores_mp, lags=lags_mp)
-                    st.session_state['fig_mp'] = fig
-                    #st.dataframe(df_resumen_mp, use_container_width=True)
-
-
-
-                except Exception as e:
-                    st.error(f"Error durante el pronóstico: {e}")
-
-    # Mostrar resultados si ya existen
-    if 'df_resumen_mp' in st.session_state:
-        st.subheader("Resumen del pronóstico MP")
-        st.dataframe(st.session_state['df_resumen_mp'], use_container_width=True)
-
-        # Reconstruir gráfica si no está en session_state
-        if 'fig_mp' not in st.session_state:
-            st.session_state['fig_mp'] = graficar_pronosticos_mp(
-                st.session_state['df_consumo'],
-                st.session_state['resultados_mp'],
-                st.session_state['colores_mp']
-            )
-
-        st.plotly_chart(st.session_state['fig_mp'], use_container_width=True)
-
-        buffer_mp = io.BytesIO()
-        st.session_state['df_resumen_mp'].to_excel(buffer_mp, index=False)
-        st.download_button(
-            "📥 Descargar resumen MP en Excel",
-            data=buffer_mp.getvalue(),
-            file_name="resumen_mp.xlsx"
         )
 

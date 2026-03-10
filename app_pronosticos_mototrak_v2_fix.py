@@ -35,7 +35,7 @@ except ImportError:
     st = None
     USANDO_STREAMLIT = False
 
-
+from funciones_pronosticos.funciones_pronosticos_nixtla_fix import ejecutar_motor_statsforecast
 
 # %% [markdown]
 # # Funciones de Apoyo de Carga de Datos
@@ -95,103 +95,6 @@ def cargar_demandas_por_region(archivo_norte, archivo_centro, archivo_sur):
     df_agregado = pd.concat(dataframes, ignore_index=True)
 
     return df_agregado
-
-
-def _normalizar_nombre_regional(nombre):
-    """
-    Normaliza etiquetas de regional a NORTE, CENTRO o SUR.
-    """
-    if pd.isna(nombre):
-        return None
-
-    texto = str(nombre).strip().upper()
-    if "NORTE" in texto:
-        return "NORTE"
-    if "CENTRO" in texto:
-        return "CENTRO"
-    if "SUR" in texto:
-        return "SUR"
-    return None
-
-
-def cargar_demandas_desde_excel_demanda(archivo_excel, hoja='Demand'):
-    """
-    Carga la demanda de PT desde un único Excel (hoja 'Demand').
-
-    Soporta dos estructuras:
-    1) Formato tabular con columnas REGIONAL, Turn, MOTO, CUATRIMOTO, TRACTOR.
-    2) Formato en bloques por regional (Sur/Centro/Norte) con dos filas de encabezado.
-    """
-
-    # Intento 1: formato tabular directo.
-    df_tabular = pd.read_excel(archivo_excel, sheet_name=hoja)
-    columnas_tabular = {str(c).strip().upper(): c for c in df_tabular.columns}
-    if 'REGIONAL' in columnas_tabular and 'TURN' in columnas_tabular:
-        df_tabular = df_tabular.rename(columns={v: k for k, v in columnas_tabular.items()})
-        df_tabular['REGIONAL'] = df_tabular['REGIONAL'].astype(str).str.upper().str.strip()
-        st.write(
-            "✅ Último turno cargado por regional:",
-            df_tabular.groupby('REGIONAL')['TURN'].max().to_dict()
-        )
-        # Mantener nombre de columna esperado en el resto del pipeline.
-        return df_tabular.rename(columns={'TURN': 'Turn'})
-
-    # Intento 2: formato por bloques regionales.
-    archivo_excel.seek(0)
-    df_raw = pd.read_excel(archivo_excel, sheet_name=hoja, header=None)
-
-    if df_raw.shape[0] < 3:
-        raise ValueError("La hoja 'Demand' no tiene el formato esperado.")
-
-    fila_regionales = df_raw.iloc[0]
-    fila_columnas = df_raw.iloc[1]
-
-    turn_cols = [
-        i for i, val in enumerate(fila_columnas)
-        if str(val).strip().upper() == 'TURN'
-    ]
-
-    if not turn_cols:
-        raise ValueError("No se encontraron columnas 'Turn' en la hoja 'Demand'.")
-
-    dataframes = []
-    n_cols = df_raw.shape[1]
-
-    for idx, col_inicio in enumerate(turn_cols):
-        col_fin = turn_cols[idx + 1] if idx + 1 < len(turn_cols) else n_cols
-
-        regional = _normalizar_nombre_regional(fila_regionales.iloc[col_inicio])
-        if regional is None:
-            continue
-
-        encabezados = [
-            str(c).strip().upper()
-            for c in fila_columnas.iloc[col_inicio:col_fin].tolist()
-        ]
-        bloque = df_raw.iloc[2:, col_inicio:col_fin].copy()
-        bloque.columns = encabezados
-
-        if 'TURN' not in bloque.columns:
-            continue
-
-        bloque = bloque.dropna(subset=['TURN'])
-        bloque['TURN'] = pd.to_numeric(bloque['TURN'], errors='coerce')
-        bloque = bloque.dropna(subset=['TURN'])
-        bloque['TURN'] = bloque['TURN'].astype(int)
-
-        for col in ['MOTO', 'CUATRIMOTO', 'TRACTOR']:
-            if col in bloque.columns:
-                bloque[col] = pd.to_numeric(bloque[col], errors='coerce')
-
-        bloque['REGIONAL'] = regional
-        dataframes.append(bloque)
-        st.write(f"✅ Último turno cargado para {regional}: {bloque['TURN'].max()}")
-
-    if not dataframes:
-        raise ValueError("No se pudo extraer demanda por regional desde la hoja 'Demand'.")
-
-    df_agregado = pd.concat(dataframes, ignore_index=True)
-    return df_agregado.rename(columns={'TURN': 'Turn'})
 
 # %% [markdown]
 # ## Carga de datos maestros
@@ -976,18 +879,40 @@ seccion = st.sidebar.radio("Selecciona sección", ["Pronósticos PT", "Pronósti
 # PESTAÑA PRODUCTO TERMINADO
 # ----------------------------
 if seccion == "Pronósticos PT":
-    st.subheader("Cargar archivo de demanda consolidado")
-    archivo_demanda = st.file_uploader(
-        "Archivo Excel de demanda (hoja 'Demand')",
-        type=["xlsx"]
-    )
+    st.subheader("Cargar archivos de demanda por región")
+    archivo_norte = st.file_uploader("Archivo demanda NORTE", type=["csv"])
+    archivo_centro = st.file_uploader("Archivo demanda CENTRO", type=["csv"])
+    archivo_sur = st.file_uploader("Archivo demanda SUR", type=["csv"])
 
     periodos_atras_pt = st.number_input("Periodos hacia atrás para backtesting (PT)", min_value=1, max_value=60, value=12)
     lags_pt = st.number_input("Cantidad de periodos a pronosticar (lags PT)", min_value=1, max_value=24, value=6)
 
-    if archivo_demanda:
+    # ✅ Selector de modelos (StatsForecast)
+    opciones_modelos_pt = {
+        "Promedio móvil 3": "pm_3",
+        "Promedio móvil 6": "pm_6",
+        "Promedio móvil 12": "pm_12",
+        "Holt-Winters": "hw",
+        "MSTL": "mstl",
+        "Naive": "naive",
+        "Seasonal Naive": "snaive",
+        "AutoETS": "autoets",
+        "AutoTheta": "autotheta",
+        "Regresión lineal": "linear_reg",
+    }
+
+    seleccion_humana_pt = st.multiselect(
+        "Modelos a evaluar (PT)",
+        options=list(opciones_modelos_pt.keys()),
+        default=["Promedio móvil 3", "Holt-Winters", "MSTL"]
+    )
+
+    modelos_seleccionados_pt = [opciones_modelos_pt[m] for m in seleccion_humana_pt]
+
+
+    if archivo_norte and archivo_centro and archivo_sur:
         productos = ['MOTO', 'CUATRIMOTO', 'TRACTOR']
-        df_agregado = cargar_demandas_desde_excel_demanda(archivo_demanda, hoja='Demand')
+        df_agregado = cargar_demandas_por_region(archivo_norte, archivo_centro, archivo_sur)
         df_final = preprocesar_datos_parte_1(df_agregado, productos)
         df = preprocesar_datos_parte_2(df_final)
         st.session_state["df"] = df
@@ -997,14 +922,41 @@ if seccion == "Pronósticos PT":
 
         if st.button("Generar pronóstico de PT"):
           
-            resultados_pt = crear_pronosticos_generico(series_dict_pt, periodos_atras_pt, lags_pt)
-            df_resumen_pt = generar_resumen_pt(resultados_pt)
+            # ✅ Motor StatsForecast (Nixtla)
+            # OJO: df es tu dataframe ya preprocesado (salió de preprocesar_datos_parte_2)
+            res_pt = ejecutar_motor_statsforecast(
+                df_original=df,
+                modo="PT",
+                h=lags_pt,
+                step_size=1,
+                n_windows=periodos_atras_pt,
+                season_length=13,
+                pms_windows=[3, 6, 12],
+                incluir_regresion_lineal=("linear_reg" in modelos_seleccionados_pt),
+                modelos_seleccionados=modelos_seleccionados_pt
+            )
 
-            st.session_state['resultados_pt'] = resultados_pt
-            st.session_state['df_resumen_pt'] = df_resumen_pt
+            # Resultados del motor
+            score_pt_global = res_pt["score_global"]        # 1 fila: MAE%, sesgo%, score% (mejores modelos)
+            score_pt_series = res_pt["score_por_serie"]     # por unique_id: MAE%, sesgo%, score%
+            score_modelos_pt = res_pt["df_scores_modelos"]  # ranking de modelos (global)
 
-            fig = graficar_pronosticos_pt(df, resultados_pt, colores_pt)
-            st.session_state['fig_pt'] = fig
+            ganadores_pt = res_pt["mejores_modelos"]        # mejor modelo por serie
+            forecast_pt = res_pt["forecasts_filtrados"]     # pronóstico final por serie (formato largo)
+
+            # 📌 Guardar en session_state para mostrar luego
+            st.session_state["score_pt_global"] = score_pt_global
+            st.session_state["score_pt_series"] = score_pt_series
+            st.session_state["score_modelos_pt"] = score_modelos_pt
+            st.session_state["ganadores_pt"] = ganadores_pt
+            st.session_state["forecast_pt"] = forecast_pt
+
+            # Resumen para Excel: ganador + métricas por serie
+            st.session_state["df_resumen_pt"] = ganadores_pt.merge(score_pt_series, on="unique_id", how="left")
+
+            # (Opcional) Si quieres que la gráfica funcione con tu función existente,
+            # necesitaríamos adaptar graficar_pronosticos_pt para leer forecast_pt.
+            # Por ahora, dejamos la tabla lista y en el siguiente paso adaptamos la gráfica.
 
     # Mostrar resultados si ya existen
     if 'df_resumen_pt' in st.session_state:
@@ -1012,14 +964,22 @@ if seccion == "Pronósticos PT":
         st.dataframe(st.session_state['df_resumen_pt'], use_container_width=True)
 
         # Reconstruir gráfica si no está en session_state
-        if 'fig_pt' not in st.session_state:
-            st.session_state['fig_pt'] = graficar_pronosticos_pt(
-                st.session_state['df'],
-                st.session_state['resultados_pt'],
-                {'MOTO': 'salmon', 'CUATRIMOTO': 'navy', 'TRACTOR': 'darkcyan'}
-            )
+        # Mostrar métricas del motor (PT)
+        if "score_pt_global" in st.session_state:
+            st.subheader("📌 Score global (PT) — mejores modelos")
+            fila = st.session_state["score_pt_global"].iloc[0]
 
-        st.plotly_chart(st.session_state['fig_pt'], use_container_width=True)
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                st.metric("MAE (%)", f"{fila['mae_porc']*100:.2f}%")
+            with c2:
+                st.metric("Sesgo (%)", f"{fila['sesgo_porc']*100:.2f}%")
+            with c3:
+                st.metric("Score (%)", f"{fila['score_porc']*100:.2f}%")
+
+        if "score_modelos_pt" in st.session_state:
+            st.subheader("🏁 Ranking de modelos evaluados (PT)")
+            st.dataframe(st.session_state["score_modelos_pt"], use_container_width=True)
 
         buffer_pt = io.BytesIO()
         st.session_state['df_resumen_pt'].to_excel(buffer_pt, index=False)
@@ -1091,7 +1051,7 @@ elif seccion == "Pronósticos MP":
         # Reconstruir gráfica si no está en session_state
         if 'fig_mp' not in st.session_state:
             st.session_state['fig_mp'] = graficar_pronosticos_mp(
-                st.session_state['df_consumo'],
+                st.session_state['df'],
                 st.session_state['resultados_mp'],
                 st.session_state['colores_mp']
             )
