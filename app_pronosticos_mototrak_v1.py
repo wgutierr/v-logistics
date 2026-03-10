@@ -193,6 +193,57 @@ def cargar_demandas_desde_excel_demanda(archivo_excel, hoja='Demand'):
     df_agregado = pd.concat(dataframes, ignore_index=True)
     return df_agregado.rename(columns={'TURN': 'Turn'})
 
+
+def cargar_bom_desde_excel_gameplay(archivo_excel, hoja='Products & Materials'):
+    """
+    Extrae la matriz BOM (PRODUCTO x MOTO/CUATRIMOTO/TRACTOR) desde
+    la hoja 'Products & Materials' del archivo gameplay-export.
+    """
+    archivo_excel.seek(0)
+    raw = pd.read_excel(archivo_excel, sheet_name=hoja, header=None)
+
+    # Buscar la fila de encabezado de la relación Product - Raw Material.
+    header_idx = None
+    for i in range(len(raw)):
+        val = str(raw.iloc[i, 0]).strip().upper() if pd.notna(raw.iloc[i, 0]) else ""
+        if "PRODUCT \\ RAW MATERIAL" in val:
+            header_idx = i
+            break
+
+    if header_idx is None:
+        raise ValueError("No se encontró la tabla 'Product - Raw Material Relationship'.")
+
+    header = raw.iloc[header_idx]
+    col_indices = [j for j in range(1, len(header)) if pd.notna(header.iloc[j])]
+    if not col_indices:
+        raise ValueError("No se encontraron materias primas en 'Products & Materials'.")
+
+    # Filas esperadas inmediatamente después del encabezado.
+    row_moto = raw.iloc[header_idx + 1]
+    row_cuatri = raw.iloc[header_idx + 2]
+    row_tractor = raw.iloc[header_idx + 3]
+
+    nombre_moto = str(row_moto.iloc[0]).strip().upper() if pd.notna(row_moto.iloc[0]) else ""
+    nombre_cuatri = str(row_cuatri.iloc[0]).strip().upper() if pd.notna(row_cuatri.iloc[0]) else ""
+    nombre_tractor = str(row_tractor.iloc[0]).strip().upper() if pd.notna(row_tractor.iloc[0]) else ""
+    if not ("MOTO" in nombre_moto and "CUATRIMOTO" in nombre_cuatri and "TRACTOR" in nombre_tractor):
+        raise ValueError("Las filas de MOTO/CUATRIMOTO/TRACTOR no tienen el formato esperado.")
+
+    filas = []
+    for j in col_indices:
+        filas.append({
+            'PRODUCTO': str(header.iloc[j]).strip(),
+            'MOTO': 0 if pd.isna(row_moto.iloc[j]) else row_moto.iloc[j],
+            'CUATRIMOTO': 0 if pd.isna(row_cuatri.iloc[j]) else row_cuatri.iloc[j],
+            'TRACTOR': 0 if pd.isna(row_tractor.iloc[j]) else row_tractor.iloc[j],
+        })
+
+    df_bom_mp = pd.DataFrame(filas)
+    for col in ['MOTO', 'CUATRIMOTO', 'TRACTOR']:
+        df_bom_mp[col] = pd.to_numeric(df_bom_mp[col], errors='coerce').fillna(0)
+
+    return df_bom_mp
+
 # %% [markdown]
 # ## Carga de datos maestros
 
@@ -1184,6 +1235,12 @@ if seccion == "Pronósticos PT":
         df_final = preprocesar_datos_parte_1(df_agregado, productos)
         df = preprocesar_datos_parte_2(df_final)
         st.session_state["df"] = df
+        try:
+            df_bom_mp_game = cargar_bom_desde_excel_gameplay(archivo_demanda, hoja='Products & Materials')
+            df_bom_vertical = preprocesar_datos_mp(df_bom_mp_game)
+            st.session_state["df_bom_vertical"] = df_bom_vertical
+        except Exception as e:
+            st.warning(f"No se pudo cargar BOM desde 'Products & Materials': {e}")
 
         colores_pt = {'MOTO': 'salmon', 'CUATRIMOTO': 'navy', 'TRACTOR': 'darkcyan'}
         series_dict_pt = crear_dicc_pt(df)
@@ -1226,56 +1283,50 @@ if seccion == "Pronósticos PT":
 # PESTAÑA MATERIA PRIMA
 # ----------------------------
 elif seccion == "Pronósticos MP":
-    st.subheader("Cargar archivo maestro de datos")
-    archivo_maestro = st.file_uploader("Archivo Excel (Info Maestra)", type=["xlsx"])
+    st.subheader("Materia prima desde archivo de demanda consolidado")
+    st.caption("La BOM se toma de la hoja 'Products & Materials' del Excel cargado en Pronósticos PT.")
 
-    if archivo_maestro:
-        df_bom_mp, df_m_d_o, df_transporte, df_almacenamiento = cargar_data_maestra(archivo_maestro)
-        df_bom_vertical = preprocesar_datos_mp(df_bom_mp)
-        st.session_state["df_bom_vertical"] = df_bom_vertical  # 💾 Guardar en session_state
+    if st.button("Ejecutar explosión de materiales"):
+        try:
+            if "df" not in st.session_state:
+                st.warning("Primero debes generar el pronóstico de Producto Terminado.")
+                st.stop()
+            if "df_bom_vertical" not in st.session_state:
+                st.warning("No se encontró BOM en session_state. Vuelve a cargar el Excel en Pronósticos PT.")
+                st.stop()
 
-        if st.button("Ejecutar explosión de materiales"):
+            df = st.session_state["df"]
+            df_bom_vertical = st.session_state["df_bom_vertical"]
+            df_consumo = explosionar_mp(df, df_bom_vertical)
+            st.session_state["df_consumo"] = df_consumo
+            st.success("Explosión realizada con éxito")
+        except Exception as e:
+            st.error(f"Error durante la explosión de materiales: {e}")
+
+    # Parámetros visibles siempre que haya datos disponibles
+    if "df_consumo" in st.session_state and "df_bom_vertical" in st.session_state:
+        periodos_atras_mp = st.number_input("Periodos hacia atrás para backtesting (MP)", min_value=1, max_value=60, value=12)
+        lags_mp = st.number_input("Cantidad de periodos a pronosticar (lags MP)", min_value=1, max_value=24, value=6)
+
+        if st.button("Generar pronóstico de MP"):
             try:
-                if "df" not in st.session_state:
-                    st.warning("Primero debes generar el pronóstico de Producto Terminado.")
-                    st.stop()
+                df_consumo = st.session_state["df_consumo"]
+                df_bom_vertical = st.session_state["df_bom_vertical"]
 
-                df = st.session_state["df"]
-                df_consumo = explosionar_mp(df, df_bom_vertical)
-                st.session_state["df_consumo"] = df_consumo  # 💾 Guardar en session_state
-                st.success("Explosión realizada con éxito")
+                series_dict_mp = crear_dicc_mp(df_consumo)
+                resultados_mp = crear_pronosticos_generico(series_dict_mp, periodos_atras_mp, lags_mp)
+                df_resumen_mp = generar_resumen_mp(resultados_mp)
+
+                st.session_state['resultados_mp'] = resultados_mp
+                st.session_state['df_resumen_mp'] = df_resumen_mp
+
+                colores_mp = generar_colores_mp(df_bom_vertical['MATERIA_PRIMA'].unique())
+                st.session_state['colores_mp'] = colores_mp
+
+                fig = graficar_pronosticos_mp(df_consumo, resultados_mp, colores_mp, lags=lags_mp)
+                st.session_state['fig_mp'] = fig
             except Exception as e:
-                st.error(f"Error durante la explosión de materiales: {e}")
-
-        # Parámetros visibles siempre que haya datos disponibles
-        if "df_consumo" in st.session_state and "df_bom_vertical" in st.session_state:
-            periodos_atras_mp = st.number_input("Periodos hacia atrás para backtesting (MP)", min_value=1, max_value=60, value=12)
-            lags_mp = st.number_input("Cantidad de periodos a pronosticar (lags MP)", min_value=1, max_value=24, value=6)
-
-            if st.button("Generar pronóstico de MP"):
-                try:
-                    df_consumo = st.session_state["df_consumo"]
-                    df_bom_vertical = st.session_state["df_bom_vertical"]
-
-                    series_dict_mp = crear_dicc_mp(df_consumo)                  
-                    resultados_mp = crear_pronosticos_generico(series_dict_mp, periodos_atras_mp, lags_mp)
-                    df_resumen_mp = generar_resumen_mp(resultados_mp)
-
-                    st.session_state['resultados_mp'] = resultados_mp
-                    st.session_state['df_resumen_mp'] = df_resumen_mp
-
-                    colores_mp = generar_colores_mp(df_bom_vertical['MATERIA_PRIMA'].unique())
-                    st.session_state['colores_mp'] = colores_mp
-
-                    fig = graficar_pronosticos_mp(df_consumo, resultados_mp, colores_mp, lags=lags_mp)
-                    st.session_state['fig_mp'] = fig
-                    #st.dataframe(df_resumen_mp, use_container_width=True)
-
-
-
-                except Exception as e:
-                    st.error(f"Error durante el pronóstico: {e}")
-
+                st.error(f"Error durante el pronóstico: {e}")
     # Mostrar resultados si ya existen
     if 'df_resumen_mp' in st.session_state:
         st.subheader("Resumen del pronóstico MP")
@@ -1298,4 +1349,5 @@ elif seccion == "Pronósticos MP":
             data=buffer_mp.getvalue(),
             file_name="resumen_mp.xlsx"
         )
+
 
