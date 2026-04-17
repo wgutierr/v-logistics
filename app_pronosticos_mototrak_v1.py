@@ -357,94 +357,6 @@ def cargar_bom_desde_excel_gameplay(archivo_excel, hoja='Products & Materials'):
 
 
 
-def cargar_produccion_desde_excel_gameplay(archivo_excel, hoja='Production'):
-    """
-    Extrae tiempos de proceso (min/unidad) y capacidades por proceso desde
-    la hoja 'Production' del archivo gameplay-export.
-    """
-    archivo_excel.seek(0)
-    raw = pd.read_excel(archivo_excel, sheet_name=hoja, header=None)
-
-
-
-    # Fila de encabezado con procesos.
-    header_idx = None
-    for i in range(len(raw)):
-        fila_texto = " | ".join([str(v).upper() for v in raw.iloc[i].tolist() if pd.notna(v)])
-        if "ARMAR BASE" in fila_texto:
-            header_idx = i
-            break
-    if header_idx is None:
-        raise ValueError("No se encontró el encabezado de procesos en 'Production'.")
-
-
-
-    header = raw.iloc[header_idx]
-    procesos = []
-    col_procesos = []
-    for j in range(1, len(header)):
-        if pd.notna(header.iloc[j]) and str(header.iloc[j]).strip():
-            procesos.append(str(header.iloc[j]).strip())
-            col_procesos.append(j)
-    if not procesos:
-        raise ValueError("No se encontraron procesos en 'Production'.")
-
-
-
-    # Filas de productos.
-    filas_producto = []
-    for i in range(header_idx + 1, len(raw)):
-        nombre = str(raw.iloc[i, 0]).strip().upper() if pd.notna(raw.iloc[i, 0]) else ""
-        if nombre in {"MOTO", "CUATRIMOTO", "TRACTOR"}:
-            filas_producto.append(i)
-    if len(filas_producto) < 3:
-        raise ValueError("No se encontraron las filas de MOTO/CUATRIMOTO/TRACTOR en 'Production'.")
-
-
-
-    # Fila de disponibilidad/capacidad.
-    disp_idx = None
-    for i in range(header_idx + 1, len(raw)):
-        nombre = str(raw.iloc[i, 0]).strip().upper() if pd.notna(raw.iloc[i, 0]) else ""
-        if "DISPONIBILIDAD" in nombre:
-            disp_idx = i
-            break
-    if disp_idx is None:
-        raise ValueError("No se encontró la fila de disponibilidad en 'Production'.")
-
-
-
-    # Tabla de tiempos por producto.
-    registros_tiempo = []
-    for i in filas_producto:
-        producto = str(raw.iloc[i, 0]).strip().upper()
-        for proc, j in zip(procesos, col_procesos):
-            valor = pd.to_numeric(raw.iloc[i, j], errors='coerce')
-            registros_tiempo.append({
-                "PRODUCTO": producto,
-                "PROCESO": proc,
-                "MIN_POR_UNIDAD": 0 if pd.isna(valor) else float(valor)
-            })
-    df_tiempos = pd.DataFrame(registros_tiempo)
-
-
-
-    # Tabla de capacidad por proceso.
-    registros_cap = []
-    for proc, j in zip(procesos, col_procesos):
-        valor = pd.to_numeric(raw.iloc[disp_idx, j], errors='coerce')
-        registros_cap.append({
-            "PROCESO": proc,
-            "CAPACIDAD_MIN": 0 if pd.isna(valor) else float(valor)
-        })
-    df_capacidad = pd.DataFrame(registros_cap)
-
-
-
-    return df_tiempos, df_capacidad
-
-
-
 # %% [markdown]
 # ## Carga de datos maestros
 
@@ -1917,6 +1829,108 @@ st.set_page_config(page_title="App de Pronósticos Mototrak", layout="wide")
 
 st.title("App de Pronósticos para Producto Terminado y Materia Prima")
 #pestaña_pt, pestaña_mp = st.tabs(["Pronósticos PT", "Pronósticos MP"])
+def normalizar_nombre_proceso(nombre):
+    """
+    Lleva variaciones de nombres de proceso a una etiqueta canónica común
+    para gameplay-export y MotoTrack.
+    """
+    texto = "" if pd.isna(nombre) else str(nombre).strip()
+    if not texto:
+        return texto
+
+    canon = texto.upper().translate(str.maketrans("ÁÉÍÓÚÜ", "AEIOUU"))
+    canon = re.sub(r"\s+", " ", canon)
+
+    equivalencias = {
+        "ARMAR BASE": "Armar Base",
+        "ARMAR CHASIS": "Armar Chasis",
+        "RUEDA - ORUGA": "Rueda - Oruga",
+        "RUEDAS - ORUGA": "Rueda - Oruga",
+        "ASIENTO - VOLANTE": "Asiento - Volante",
+    }
+    return equivalencias.get(canon, texto)
+
+
+def cargar_produccion_desde_excel_gameplay(archivo_excel, hoja='Production'):
+    """
+    Extrae tiempos de proceso (min/unidad) y capacidades por proceso desde
+    la hoja 'Production' del archivo gameplay-export.
+
+    Esta versiÃ³n tolera el formato compacto actual de MotoTrak y no falla
+    si la fila de disponibilidad no viene o cambia de nombre.
+    """
+    archivo_excel.seek(0)
+    raw = pd.read_excel(archivo_excel, sheet_name=hoja, header=None)
+
+    header_idx = None
+    for i in range(len(raw)):
+        fila_texto = " | ".join(
+            [str(v).strip().upper() for v in raw.iloc[i].tolist() if pd.notna(v)]
+        )
+        if "ARMAR BASE" in fila_texto:
+            header_idx = i
+            break
+    if header_idx is None:
+        raise ValueError("No se encontrÃ³ el encabezado de procesos en 'Production'.")
+
+    header = raw.iloc[header_idx]
+    procesos = []
+    col_procesos = []
+    for j in range(1, len(header)):
+        if pd.notna(header.iloc[j]) and str(header.iloc[j]).strip():
+            procesos.append(normalizar_nombre_proceso(header.iloc[j]))
+            col_procesos.append(j)
+    if not procesos:
+        raise ValueError("No se encontraron procesos en 'Production'.")
+
+    productos_objetivo = {"MOTO", "CUATRIMOTO", "TRACTOR"}
+    filas_producto = []
+    for i in range(header_idx + 1, len(raw)):
+        nombre = str(raw.iloc[i, 0]).strip().upper() if pd.notna(raw.iloc[i, 0]) else ""
+        if nombre in productos_objetivo:
+            filas_producto.append(i)
+    if len(filas_producto) < 3:
+        raise ValueError("No se encontraron las filas de MOTO/CUATRIMOTO/TRACTOR en 'Production'.")
+
+    etiquetas_capacidad = (
+        "DISPONIBILIDAD", "AVAILABILITY", "CAPACIDAD", "CAPACITY",
+        "MIN DISPONIBLES", "MIN AVAILABLE", "TIEMPO DISPONIBLE"
+    )
+    disp_idx = None
+    for i in range(header_idx + 1, len(raw)):
+        fila_texto = " | ".join(
+            [str(v).strip().upper() for v in raw.iloc[i].tolist() if pd.notna(v)]
+        )
+        if any(etiqueta in fila_texto for etiqueta in etiquetas_capacidad):
+            disp_idx = i
+            break
+
+    registros_tiempo = []
+    for i in filas_producto:
+        producto = str(raw.iloc[i, 0]).strip().upper()
+        for proc, j in zip(procesos, col_procesos):
+            valor = pd.to_numeric(raw.iloc[i, j], errors='coerce')
+            registros_tiempo.append({
+                "PRODUCTO": producto,
+                "PROCESO": proc,
+                "MIN_POR_UNIDAD": 0 if pd.isna(valor) else float(valor)
+            })
+    df_tiempos = pd.DataFrame(registros_tiempo)
+
+    registros_cap = []
+    for proc, j in zip(procesos, col_procesos):
+        valor = np.nan
+        if disp_idx is not None:
+            valor = pd.to_numeric(raw.iloc[disp_idx, j], errors='coerce')
+        registros_cap.append({
+            "PROCESO": proc,
+            "CAPACIDAD_MIN": np.nan if pd.isna(valor) else float(valor)
+        })
+    df_capacidad = pd.DataFrame(registros_cap)
+
+    return df_tiempos, df_capacidad
+
+
 seccion = st.sidebar.radio("Selecciona sección", ["Pronósticos PT", "Pronósticos MP", "Capacidad Procesos Planta"])
 modelos_disponibles = ['hw', 'hw_13', 'wa_3', 'wa_6', 'wa_12', 'ses', 'mstl', 'autoarima', 'sarimax', 'theta', 'doc']
 modelos_default = ['hw', 'hw_13', 'wa_3', 'wa_6', 'wa_12', 'ses', 'mstl']
@@ -2142,9 +2156,11 @@ elif seccion == "Capacidad Procesos Planta":
     if "resultados_pt" not in st.session_state:
         st.warning("Primero genera el pronóstico de Producto Terminado en la pestaña PT.")
         st.stop()
-    if "df_tiempos_prod" not in st.session_state or "df_capacidad_proc" not in st.session_state:
-        st.warning("No se encontraron tiempos/capacidades de Production. Vuelve a cargar el Excel en PT.")
+    if "df_tiempos_prod" not in st.session_state:
+        st.warning("No se encontraron tiempos de Production. Vuelve a cargar el Excel en PT.")
         st.stop()
+    if "df_capacidad_proc" not in st.session_state:
+        st.session_state["df_capacidad_proc"] = pd.DataFrame(columns=["PROCESO", "CAPACIDAD_MIN"])
     df_pron_pt_planta = construir_pronostico_pt_planta(st.session_state["resultados_pt"])
     df_carga_proc = calcular_carga_procesos_planta(
         df_pron_pt_planta,
@@ -2154,6 +2170,14 @@ elif seccion == "Capacidad Procesos Planta":
     if df_carga_proc.empty:
         st.info("No hay datos suficientes para calcular capacidad por proceso.")
     else:
+        if (
+            "CAPACIDAD_MIN" not in df_carga_proc.columns
+            or df_carga_proc["CAPACIDAD_MIN"].isna().all()
+        ):
+            st.info(
+                "Se cargaron los tiempos de 'Production', pero no se identificó "
+                "una fila de capacidad/disponibilidad en ese archivo."
+            )
         st.dataframe(df_carga_proc, use_container_width=True)
         fig_cap = graficar_capacidad_procesos(df_carga_proc)
         st.plotly_chart(fig_cap, use_container_width=True)
